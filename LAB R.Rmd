@@ -1,0 +1,917 @@
+---
+title: "Untitled"
+author: "Matteo Simeoni"
+date: "2024-09-07"
+output: pdf_document
+---
+# ANALISI ALBERI DECISIONALI perdita di peso
+
+
+## 1. ESPLORATION: 
+
+
+
+
+```{r}
+library(sas7bdat)
+df <- read.sas7bdat("/Users/matteosimeoni/Desktop/Fuobauxo/FUOBAUXO.sas7bdat", encoding = "latin1")
+head(df)
+
+
+```
+Dimensioni dataset
+
+```{r}
+dim(df)
+```
+
+
+Ci sono 2076 pazienti, con queste caratteristiche:
+
+
+```{r}
+mean(df$eta,  na.rm = TRUE)
+mean(df$peso,  na.rm = TRUE) #peso iniziale
+mean(df$altezza,  na.rm = TRUE)
+mean(df$BMI,  na.rm = TRUE)
+
+
+sd(df$eta,  na.rm = TRUE)
+sd(df$peso,  na.rm = TRUE) #peso iniziale
+sd(df$altezza,  na.rm = TRUE)
+sd(df$BMI,  na.rm = TRUE)
+
+
+```
+
+Analizzando le medie e le deviazioni standard di queste variabili posso concludere che i pazienti sono affetti da obesità
+
+
+
+### Analisi distribuzione BMI
+
+```{r}
+library(ggplot2)
+
+ggplot(df, aes(x = BMI)) + 
+  geom_histogram(binwidth = 2, fill = "light grey", color = "black", alpha = 0.7) + 
+  labs(title = "Distribuzione del BMI tra i pazienti", 
+       x = "BMI", 
+       y = "Numero di pazienti") + 
+  theme_minimal()
+
+```
+
+
+
+
+
+```{r}
+
+# Creiamo una nuova colonna per le categorie di BMI
+df$bmi_categoria <- cut(df$BMI,
+                        breaks = c(-Inf, 18.5, 24.9, 29.9, 34.9, 39.9, Inf),
+                        labels = c("Sottopeso", "Normopeso", "Sovrappeso", "Obesità 1", "Obesità 2", "Obesità 3"))
+
+df <- df[!is.na(df$bmi_categoria), ]
+
+ggplot(df, aes(x = bmi_categoria)) +
+  geom_bar(fill = "gray", color = "black", alpha = 0.7) +
+  labs(title = "Distribuzione delle Categorie di BMI tra i Pazienti",
+       x = "Categoria di BMI",
+       y = "Numero di Pazienti") +
+  theme_minimal()
+
+```
+
+```{r}
+df$bmi_categoria <- NULL
+
+```
+
+
+
+$$
+\text{BMI medio} = \frac{115.09}{(1.6263)^2} \approx 43.53
+$$
+Il BMI medio rispecchia ciò che si vede nel grafico a barre
+
+
+
+
+
+
+
+
+```{r}
+library(ggplot2)
+library(reshape2)
+
+df_melt <- melt(df, measure.vars = c("BMI", "peso", "altezza"), 
+                variable.name = "variabile", value.name = "valore")
+
+ggplot(df_melt, aes(x = variabile, y = valore)) + 
+  geom_boxplot(fill = "gray", color = "black", alpha = 0.7) + 
+  labs(title = "Distribuzione di BMI, Peso e Altezza tra i pazienti",
+       x = "Variabile",
+       y = "Valore") + 
+  theme_minimal() +
+  theme(legend.position = "none")
+
+
+```
+
+
+La variabilità del peso è significativamente più elevata rispetto al BMI e all'altezza, come indicato dalla lunghezza della "scatola" e dalla presenza di molti outliers.
+Il BMI è meno disperso, ma gli outliers presenti indicano che ci sono alcuni pazienti con valori estremi.
+L'altezza ha una distribuzione piuttosto stretta, con meno variabilità rispetto alle altre due variabili, come atteso.
+
+
+
+```{r}
+# Sostituire le stringhe vuote ("") con NA
+df[df == ""] <- NA
+# Sostituire "NULL" o altri valori carattere specifici con NA
+df[df == "NULL"] <- NA
+```
+
+
+Visualizzo quanti NaN ha il df e quanti ce ne sono mediamente per colonna
+
+```{r}
+num_col_with_na <- sum(colSums(is.na(df)) > 0)
+total_na <- sum(is.na(df))
+mean_columns <- total_na/ 562 #n colonne
+
+cat("Numero di colonne con almeno un valore NaN: ", num_col_with_na, "\n")
+cat("Totale NaN nel dataframe: ", total_na, "\n")
+cat("Media NaN per colonna: ", round(mean_columns,0), "\n")
+
+
+
+```
+
+
+
+```{r}
+
+
+total_cells <- prod(dim(df))
+total_na <- 812078
+
+total_non_na <- total_cells - total_na
+
+values <- c("NA" = total_na, "Non NA" = total_non_na)
+
+pie(values,
+    labels = c(paste("NA", round(total_na / total_cells * 100, 2), "%"),
+               paste("Non NA", round(total_non_na / total_cells * 100, 2), "%")),
+    col = c("darkgray", "lightgray"),
+    main = "Percentuale di celle NA rispetto al Totale")
+
+
+
+```
+
+
+```{r}
+columns_with_nan <- 543
+columns_without_nan <- 562 - 543
+
+values <- c("Colonne con NaN" = columns_with_nan, "Colonne senza NaN" = columns_without_nan)
+
+# Crea un grafico a torta
+pie(values,
+    col = c("darkgray", "lightgray"),  # Colori per NaN e non NaN
+    labels = c(paste("Colonne con NaN", round(columns_with_nan / sum(values) * 100, 2), "%"),
+               paste("Colonne senza NaN", round(columns_without_nan / sum(values) * 100, 2), "%")),
+    main = "Proporzione di colonne con e senza NaN")
+
+
+
+
+```
+
+
+
+## 2. DATA CLEANING
+
+
+
+
+
+colonna peso e peso_1 sono uguali
+
+```{r}
+identical(df$peso, df$peso_1)
+```
+
+
+la elimino 
+
+```{r}
+
+df$peso <- NULL
+dim(df)
+
+```
+
+
+
+### Creazione righe progressione peso
+
+
+Operazione per creare delle nuove righe per ogni id che ha una progressione del peso. Andrò così a creare una colonna **X** (osservaizione precedente) e una colonna **Y** (osservazione successiva). che andranno a creare una riga per ogni osservazione di peso rilevata per ogni **id**. 
+
+
+```{r}
+# Identifica tutte le colonne relative al peso (peso_1, peso_2, ..., peso_n)
+weight_columns <- grep("peso_", colnames(df), value = TRUE)
+
+transform_dataframe <- function(df) {
+  # Lista per memorizzare le righe trasformate
+  transformed_rows <- list()
+  
+  # Itera su ogni riga del DataFrame
+  for (idx in 1:nrow(df)) {
+    # Ottieni le informazioni di base (tutte le colonne tranne quelle dei pesi)
+    base_info <- df[idx, !colnames(df) %in% weight_columns]
+    
+    # Itera su ogni coppia di colonne peso_x e peso_x+1
+    for (i in 1:(length(weight_columns) - 1)) {
+      peso_x <- df[idx, weight_columns[i]]
+      peso_y <- df[idx, weight_columns[i + 1]]
+      
+      # Considera solo coppie valide (non-NA)
+      if (!is.na(peso_x) & !is.na(peso_y)) {
+        # Crea una nuova riga con X e Y come i due pesi
+        new_row <- base_info
+        new_row$X <- peso_x
+        new_row$Y <- peso_y
+        
+        # Aggiungi la nuova riga alla lista
+        transformed_rows[[length(transformed_rows) + 1]] <- new_row
+      }
+    }
+  }
+  
+  transformed_df <- do.call(rbind, transformed_rows)
+  
+  return(transformed_df)
+}
+
+transformed_df <- transform_dataframe(df)
+
+head(transformed_df)
+
+dim(transformed_df)
+
+```
+```{r}
+df<- transformed_df
+```
+
+
+
+### Rimozione NaN
+
+
+Elimino le colonne che hanno più del 90% di valori nulli
+
+
+
+
+```{r}
+
+nan_perc <- colMeans(is.na(df))
+
+# Mantieni solo le colonne con meno del 90% di valori NA
+df <- df[, nan_perc < 0.9]
+dim(df)
+
+
+```
+
+
+
+L'operazione ha eliminato 23 colonne
+
+
+Applico funzione di ottimizzazione
+
+
+```{r}
+# Funzione per sostituire stringhe vuote e "na" con NA
+replace_empty_with_na <- function(df) {
+  df[df == "" | df == "na"] <- NA
+  return(df)
+}
+
+# Definisci la funzione per la greedy search
+greedy_search_remove_nan <- function(df) {
+  
+  # Prima, sostituiamo eventuali stringhe vuote o "na" con NA
+  df <- replace_empty_with_na(df)
+  
+  # Continua fino a quando ci sono valori NA nel DataFrame
+  while (sum(is.na(df)) > 0) {
+    # Conta quanti valori non-NA ci sono per riga e per colonna
+    row_non_nan_counts <- rowSums(!is.na(df))
+    col_non_nan_counts <- colSums(!is.na(df))
+    
+    # Trova l'indice della riga e della colonna con meno valori non-NA
+    row_to_remove <- which.min(row_non_nan_counts)
+    col_to_remove <- which.min(col_non_nan_counts)
+    
+    # Conta i valori non-NA se rimuoviamo la riga o la colonna
+    remaining_non_nan_if_row_removed <- sum(!is.na(df[-row_to_remove, ]))
+    remaining_non_nan_if_col_removed <- sum(!is.na(df[, -col_to_remove]))
+    
+    # Scegli se rimuovere la riga o la colonna basandoti su quale preserva più valori non-NA
+    if (remaining_non_nan_if_row_removed >= remaining_non_nan_if_col_removed) {
+      df <- df[-row_to_remove, ]  # Rimuovi la riga
+    } else {
+      df <- df[, -col_to_remove]  # Rimuovi la colonna
+    }
+  }
+  
+  return(df)
+}
+
+df_cleaned <- greedy_search_remove_nan(df)
+
+print(df_cleaned)
+
+```
+
+
+Elimino colonne con variabili nominali cardinali
+
+```{r}
+
+
+# Rimuovi le colonne nominali
+df <- df_cleaned[, !(colnames(df_cleaned) %in% c("problema_BMI", "problema_eta", "step", "data", "birth_date", "birth_place", "sdo_code", "patient_key"))]
+dim(df)
+```
+
+Sostituisco i valori yes no e maschio femmina con 1 - 0
+
+
+```{r}
+df[df == "n"] <- 0
+df[df == "y"] <- 1
+df[df == "m"] <- 0
+df[df == "f"] <- 1
+
+```
+
+
+
+Creazione della variabile target **Z** con la variazione del peso 
+
+
+```{r}
+df$Z <- (df$Y - df$X) 
+
+
+dim(df)
+
+```
+
+
+```{r}
+str(df)
+
+```
+
+
+```{r}
+# Individua le colonne di tipo 'chr'
+cols_to_transform <- sapply(df, is.character)
+
+# Trasforma le colonne con "0" e "1" in valori booleani
+df[cols_to_transform] <- lapply(df[cols_to_transform], function(x) {
+  ifelse(x == "1", TRUE, FALSE)
+})
+
+```
+
+
+
+```{r}
+str(df)
+
+```
+
+```{r}
+df[sapply(df, is.logical)] <- lapply(df[sapply(df, is.logical)], as.numeric)
+str(df)
+```
+
+
+```{r}
+num_id_unici <- length(unique(df$id))
+
+cat("Numero di pazienti finali: ", num_id_unici, "\n")
+
+```
+```{r}
+dim(df)
+head(df)
+```
+
+
+
+
+
+## 3. MODELS
+
+
+
+
+### Modelli senza VSURF
+
+
+```{r}
+library(randomForest)
+library(caret)  
+library(gbm)    
+
+
+X <- df[, !(colnames(df) %in% c('id', 'Y', 'Z'))]
+y <- df$Z  # Utilizziamo la colonna 'Z' come target
+
+# Standardizzazione per Bagging e Gradient
+preProcess_scale <- preProcess(X, method = c("center", "scale"))
+X_scaled <- predict(preProcess_scale, X)
+
+# Cross-validation: K-fold con 10 fold
+train_control <- trainControl(method = "cv", number = 10)
+
+models <- list(
+    "Random Forest" = train(X, y, method = "rf", trControl = trainControl(method = "cv", number = 10)),
+    "Bagging" = train(X_scaled, y, method = "treebag", trControl = trainControl(method = "cv", number = 10)),
+    "Gradient Boosting" = train(X_scaled, y, method = "gbm", trControl = trainControl(method = "cv", number = 10), verbose = FALSE)
+)
+
+# Funzione per restituire le previsioni con cross-validation
+get_predictions_cv <- function(model, X) {
+    predictions <- predict(model, X)
+    return(predictions)
+}
+
+df_predictions <- df
+
+for (name in names(models)) {
+    if (name == "Random Forest") {
+        df_predictions[[paste0(name, "_prediction")]] <- get_predictions_cv(models[[name]], X)  # Previsioni con i dati non scalati per Random Forest
+    } else {
+        df_predictions[[paste0(name, "_prediction")]] <- get_predictions_cv(models[[name]], X_scaled)  # Previsioni con i dati scalati per Bagging e Gradient Boosting
+    }
+}
+
+head(df_predictions)
+
+```
+
+
+```{r}
+library(Metrics)
+
+calculate_performance_metrics <- function(y_true, y_pred) {
+    mae <- mae(y_true, y_pred)
+    mse <- mse(y_true, y_pred)
+    rmse <- sqrt(mse)
+    varianza <- var(y_true)
+    mse_vs_var <- mse / varianza
+    
+    return(c(
+        'MAE' = mae,
+        'MSE' = mse,
+        'RMSE' = rmse,
+        'MSE vs Varianza' = mse_vs_var
+    ))
+}
+
+performance_results <- list()
+
+for (model_name in c('Random Forest', 'Bagging', 'Gradient Boosting')) {
+    pred_column <- paste0(model_name, "_prediction")  # Nome della colonna per ogni modello
+    performance_results[[model_name]] <- calculate_performance_metrics(df_predictions$Z, df_predictions[[pred_column]])
+}
+
+# Converti i risultati in un dataframe
+df_performance <- as.data.frame(do.call(rbind, performance_results))
+print(df_performance)
+
+```
+
+
+
+
+
+
+
+
+
+###  con VSURF
+
+
+```{r}
+library(randomForest)
+library(caret)  # Per Bagging e cross-validation
+library(gbm)    # Gradient Boosting
+library(VSURF)  # Per la selezione delle variabili con VSURF
+
+
+X <- df[, !(colnames(df) %in% c('id', 'Y', 'Z'))]
+y <- df$Z  
+
+# Applica VSURF per la selezione delle variabili
+vsurf_model <- VSURF(X, y)
+
+# Ottieni le variabili selezionate
+selected_variables <- vsurf_model$varselect.pred
+
+if (length(selected_variables) > 0) {
+    # Usa solo le variabili selezionate da VSURF
+    X_selected <- X[, selected_variables]
+    
+    X_selected <- as.data.frame(X_selected)
+
+    # Standardizzazione delle caratteristiche (necessaria per Bagging e Gradient Boosting)
+    preProcess_scale <- preProcess(X_selected, method = c("center", "scale"))
+    X_scaled_selected <- predict(preProcess_scale, X_selected)
+
+    # Definizione della cross-validation: K-fold con 10 fold
+    train_control <- trainControl(method = "cv", number = 10)
+
+    models_vsurf <- list(
+        "Random Forest" = train(X_selected, y, method = "rf", trControl = trainControl(method = "cv", number = 10)),
+        "Bagging" = train(X_scaled_selected, y, method = "treebag", trControl = trainControl(method = "cv", number = 10)),
+        "Gradient Boosting" = train(X_scaled_selected, y, method = "gbm", trControl = trainControl(method = "cv", number = 10), verbose = FALSE)
+    )
+
+    # Funzione per restituire le previsioni con cross-validation
+    get_predictions_cv <- function(model, X) {
+        predictions <- predict(model, X)
+        return(predictions)
+    }
+
+    df_predictions_vsurf <- df  # Questa è la copia che conterrà le previsioni
+
+    for (name in names(models_vsurf)) {
+        if (name == "Random Forest") {
+            df_predictions_vsurf[[paste0(name, "_VSURF_prediction")]] <- get_predictions_cv(models_vsurf[[name]], X_selected)  # Previsioni con i dati non scalati per Random Forest
+        } else {
+            df_predictions_vsurf[[paste0(name, "_VSURF_prediction")]] <- get_predictions_cv(models_vsurf[[name]], X_scaled_selected)  # Previsioni con i dati scalati per Bagging e Gradient Boosting
+        }
+    }
+
+    head(df_predictions_vsurf)
+} else {
+    print("VSURF non ha selezionato alcuna variabile.")
+}
+
+```
+```{r}
+performance_results_vsurf <- list()
+
+for (model_name in c('Random Forest', 'Bagging', 'Gradient Boosting')) {
+    pred_column <- paste0(model_name, "_VSURF_prediction")  # Nome della colonna per i modelli con VSURF
+    performance_results_vsurf[[model_name]] <- calculate_performance_metrics(df_predictions_vsurf$Z, df_predictions_vsurf[[pred_column]])
+}
+
+df_performance_vsurf <- as.data.frame(do.call(rbind, performance_results_vsurf))
+print(df_performance_vsurf)
+
+```
+
+
+
+```{r}
+mse_data <- data.frame(
+    Model = rep(c("Random Forest", "Bagging", "Gradient Boosting"), each = 2),
+    VSURF = rep(c("Without VSURF", "With VSURF"), times = 3),
+    MSE = c(
+        df_performance$MSE[1], df_performance_vsurf$MSE[1],  
+        df_performance$MSE[2], df_performance_vsurf$MSE[2],  
+        df_performance$MSE[3], df_performance_vsurf$MSE[3]   
+    )
+)
+
+print(mse_data)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+library(ggplot2)
+
+ggplot(mse_data, aes(x = Model, y = MSE, fill = VSURF)) +
+    geom_bar(stat = "identity", position = "dodge") +  
+    labs(title = "Confronto MSE dei Modelli con e senza VSURF",
+         x = "Modello",
+         y = "Mean Squared Error (MSE)") +
+    theme_minimal() +
+    scale_fill_manual(values = c("Without VSURF" = "light grey", "With VSURF" = "dark grey")) +
+    theme(legend.title = element_blank()) 
+
+```
+
+
+
+
+
+### Gestione outliers
+
+Elimino gli outliers della variabile target che possono creare dei problemi ai modelli
+
+```{r}
+library(ggplot2)
+
+ggplot(df, aes(y = Z)) + 
+  geom_boxplot() +
+  labs(title = "Boxplot di Z", y = "Valori di Z")
+
+```
+
+
+
+
+```{r}
+identify_and_remove_outliers <- function(df, column) {
+  
+  Q1 <- quantile(df[[column]], 0.25)
+  Q3 <- quantile(df[[column]], 0.75)
+  IQR <- Q3 - Q1
+  
+  lower_bound <- Q1 - 1.5 * IQR
+  upper_bound <- Q3 + 1.5 * IQR
+  
+  # Identifica gli outliers 
+  outliers <- df[df[[column]] < lower_bound | df[[column]] > upper_bound, ]
+  
+  # Stampo numero
+  cat("Outliers identificati:\n")
+  print(outliers)
+  
+  # Rimozione
+  df_cleaned <- df[df[[column]] >= lower_bound & df[[column]] <= upper_bound, ]
+  
+  return(df_cleaned)
+}
+
+#eseguo sulla colonna Z
+df_no_outliers <- identify_and_remove_outliers(df, 'Z')
+
+cat("Numero di righe prima della rimozione degli outliers:", nrow(df), "\n")
+cat("Numero di righe dopo la rimozione degli outliers:", nrow(df_no_outliers), "\n")
+
+```
+
+
+
+
+
+```{r}
+df <- df_no_outliers
+```
+
+
+
+### Modelli senza VSURF
+
+
+```{r}
+library(randomForest)
+library(caret)  
+library(gbm)    
+
+
+X <- df[, !(colnames(df) %in% c('id', 'Y', 'Z'))]
+y <- df$Z  # Utilizziamo la colonna 'Z' come target
+
+# Standardizzazione per Bagging e Gradient
+preProcess_scale <- preProcess(X, method = c("center", "scale"))
+X_scaled <- predict(preProcess_scale, X)
+
+# Cross-validation: K-fold con 10 fold
+train_control <- trainControl(method = "cv", number = 10)
+
+models <- list(
+    "Random Forest" = train(X, y, method = "rf", trControl = trainControl(method = "cv", number = 10)),
+    "Bagging" = train(X_scaled, y, method = "treebag", trControl = trainControl(method = "cv", number = 10)),
+    "Gradient Boosting" = train(X_scaled, y, method = "gbm", trControl = trainControl(method = "cv", number = 10), verbose = FALSE)
+)
+
+# Funzione per restituire le previsioni con cross-validation
+get_predictions_cv <- function(model, X) {
+    predictions <- predict(model, X)
+    return(predictions)
+}
+
+df_predictions <- df
+
+for (name in names(models)) {
+    if (name == "Random Forest") {
+        df_predictions[[paste0(name, "_prediction")]] <- get_predictions_cv(models[[name]], X)  # Previsioni con i dati non scalati per Random Forest
+    } else {
+        df_predictions[[paste0(name, "_prediction")]] <- get_predictions_cv(models[[name]], X_scaled)  # Previsioni con i dati scalati per Bagging e Gradient Boosting
+    }
+}
+
+head(df_predictions)
+
+```
+
+```{r}
+library(Metrics)
+
+calculate_performance_metrics <- function(y_true, y_pred) {
+    mae <- mae(y_true, y_pred)
+    mse <- mse(y_true, y_pred)
+    rmse <- sqrt(mse)
+    varianza <- var(y_true)
+    mse_vs_var <- mse / varianza
+    
+    return(c(
+        'MAE' = mae,
+        'MSE' = mse,
+        'RMSE' = rmse,
+        'MSE vs Varianza' = mse_vs_var
+    ))
+}
+
+performance_results <- list()
+
+for (model_name in c('Random Forest', 'Bagging', 'Gradient Boosting')) {
+    pred_column <- paste0(model_name, "_prediction")  # Nome della colonna con le predizioni
+    performance_results[[model_name]] <- calculate_performance_metrics(df_predictions$Z, df_predictions[[pred_column]])
+}
+
+# Converti i risultati in un dataframe
+df_performance <- as.data.frame(do.call(rbind, performance_results))
+print(df_performance)
+
+```
+
+
+```{r}
+library(Metrics) 
+
+calculate_performance_metrics <- function(y_true, y_pred) {
+    mae <- mae(y_true, y_pred)
+    mse <- mse(y_true, y_pred)
+    rmse <- sqrt(mse)
+    varianza <- var(y_true)
+    mse_vs_var <- mse / varianza
+    
+    return(c(
+        'MAE' = mae,
+        'MSE' = mse,
+        'RMSE' = rmse,
+        'MSE vs Varianza' = mse_vs_var
+    ))
+}
+
+performance_results <- list()
+
+# Ciclo sui modelli 
+for (model_name in c('Random Forest', 'Bagging', 'Gradient Boosting')) {
+    pred_column <- paste0(model_name, "_prediction")
+    performance_results[[model_name]] <- calculate_performance_metrics(df_predictions$Z, df_predictions[[pred_column]])
+}
+
+df_performance <- as.data.frame(do.call(rbind, performance_results))
+
+print(df_performance)
+
+```
+
+
+
+###  con VSURF
+
+
+```{r}
+library(randomForest)
+library(caret)  
+library(gbm)    
+library(VSURF)  
+
+
+X <- df[, !(colnames(df) %in% c('id', 'Y', 'Z'))]
+y <- df$Z  
+
+# Applica VSURF per la selezione delle variabili
+vsurf_model <- VSURF(X, y)
+
+# Ottieni le variabili selezionate
+selected_variables <- vsurf_model$varselect.pred
+
+if (length(selected_variables) > 0) {
+    # Usa solo le variabili selezionate da VSURF
+    X_selected <- X[, selected_variables]
+    
+    X_selected <- as.data.frame(X_selected)
+
+    # Standardizzazione delle caratteristiche (necessaria per Bagging e Gradient Boosting)
+    preProcess_scale <- preProcess(X_selected, method = c("center", "scale"))
+    X_scaled_selected <- predict(preProcess_scale, X_selected)
+
+    # Definizione della cross-validation: K-fold con 10 fold
+    train_control <- trainControl(method = "cv", number = 10)
+
+    models_vsurf <- list(
+        "Random Forest" = train(X_selected, y, method = "rf", trControl = trainControl(method = "cv", number = 10)),
+        "Bagging" = train(X_scaled_selected, y, method = "treebag", trControl = trainControl(method = "cv", number = 10)),
+        "Gradient Boosting" = train(X_scaled_selected, y, method = "gbm", trControl = trainControl(method = "cv", number = 10), verbose = FALSE)
+    )
+
+    # Funzione per restituire le previsioni con cross-validation
+    get_predictions_cv <- function(model, X) {
+        predictions <- predict(model, X)
+        return(predictions)
+    }
+
+    df_predictions_vsurf <- df  # Questa è la copia che conterrà le previsioni
+
+    for (name in names(models_vsurf)) {
+        if (name == "Random Forest") {
+            df_predictions_vsurf[[paste0(name, "_VSURF_prediction")]] <- get_predictions_cv(models_vsurf[[name]], X_selected)  # Previsioni con i dati non scalati per Random Forest
+        } else {
+            df_predictions_vsurf[[paste0(name, "_VSURF_prediction")]] <- get_predictions_cv(models_vsurf[[name]], X_scaled_selected)  # Previsioni con i dati scalati per Bagging e Gradient Boosting
+        }
+    }
+
+    head(df_predictions_vsurf)
+} else {
+    print("VSURF non ha selezionato alcuna variabile.")
+}
+
+```
+```{r}
+performance_results_vsurf <- list()
+
+for (model_name in c('Random Forest', 'Bagging', 'Gradient Boosting')) {
+    pred_column <- paste0(model_name, "_VSURF_prediction")  # Nome della colonna con le predizioni
+    performance_results_vsurf[[model_name]] <- calculate_performance_metrics(df_predictions_vsurf$Z, df_predictions_vsurf[[pred_column]])
+}
+
+df_performance_vsurf <- as.data.frame(do.call(rbind, performance_results_vsurf))
+print(df_performance_vsurf)
+
+```
+
+
+
+```{r}
+
+mse_data <- data.frame(
+    Model = rep(c("Random Forest", "Bagging", "Gradient Boosting"), each = 2),
+    VSURF = rep(c("Without VSURF", "With VSURF"), times = 3),
+    MSE = c(
+        df_performance$MSE[1], df_performance_vsurf$MSE[1],  
+        df_performance$MSE[2], df_performance_vsurf$MSE[2],  
+        df_performance$MSE[3], df_performance_vsurf$MSE[3]     
+    )
+)
+
+
+print(mse_data)
+
+```
+
+
+
+```{r}
+library(ggplot2)
+
+ggplot(mse_data, aes(x = Model, y = MSE, fill = VSURF)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    labs(title = "Confronto MSE dei Modelli con e senza VSURF",
+         x = "Modello",
+         y = "Mean Squared Error (MSE)") +
+    theme_minimal() +
+    scale_fill_manual(values = c("Without VSURF" = "light grey", "With VSURF" = "dark grey")) +
+    theme(legend.title = element_blank())
+
+```
+
+
+
+
+
+
